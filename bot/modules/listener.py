@@ -4,7 +4,7 @@ from html import escape
 from json import loads
 from os import listdir, path as ospath, remove as osremove, walk
 from re import search
-from bot import DOWNLOAD_DIR, LOGGER, SERVER_PORT, TG_MAX_FILE_SIZE, Interval, status_dict, status_dict_lock, aria2, config_dict
+from bot import DOWNLOAD_DIR, LOGGER, LOCAL_MIRROR_PORT, TG_MAX_FILE_SIZE, Interval, status_dict, status_dict_lock, aria2, config_dict
 from pyrogram.enums import ChatType
 from bot.helper.ext_utils.bot_utils import add_index_link, is_archive, is_archive_split, is_first_archive_split
 from bot.helper.ext_utils.exceptions import NotSupportedExtractionArchive
@@ -12,7 +12,7 @@ from bot.helper.ext_utils.human_format import get_readable_file_size, human_read
 from bot.helper.ext_utils.message_utils import delete_all_messages, sendMarkup, sendMessage, update_all_messages
 from bot.helper.ext_utils.button_build import ButtonMaker
 from bot.helper.ext_utils.misc_utils import clean_download, clean_target, split_file
-from bot.helper.ext_utils.rclone_utils import get_gdlink
+from bot.helper.ext_utils.rclone_utils import get_drive_link
 from bot.helper.ext_utils.zip_utils import get_base_name, get_path_size
 from bot.helper.mirror_leech_utils.status_utils.tg_upload_status import TgUploadStatus
 from bot.helper.mirror_leech_utils.upload_utils.rclone_upload import RcloneMirror
@@ -238,9 +238,9 @@ class MirrorLeechListener:
             await tg_up.upload()    
         else:
             if config_dict['LOCAL_MIRROR']:
-                if BASE_URL:= config_dict['BASE_URL']:
+                if LOCAL_MIRROR_URL:= config_dict['LOCAL_MIRROR_URL']:
                     buttons= ButtonMaker()
-                    server_url = f'{BASE_URL}:{SERVER_PORT}/downloads/'
+                    server_url = f'{LOCAL_MIRROR_URL}:{LOCAL_MIRROR_PORT}/downloads/'
                     buttons.url_buildbutton("🖥 Local Server", server_url)
                     size = get_readable_file_size(size)
                     msg = f"<b>Name: </b><code>{escape(name)}</code>\n\n<b>Size: </b>{size}"
@@ -259,9 +259,9 @@ class MirrorLeechListener:
             else:
                 await RcloneMirror(up_dir, up_name, size, self.user_id, self).mirror()
 
-    async def onRcloneCopyComplete(self, conf, origin_dir, dest_drive, dest_dir):
+    async def onRcloneCopyComplete(self, conf, origin_dir, dest_remote, dest_dir):
         #Calculate Size
-        cmd = ["rclone", "size", f'--config={conf}', "--json", f"{dest_drive}:{dest_dir}{origin_dir}"]
+        cmd = ["rclone", "size", f'--config={conf}', "--json", f"{dest_remote}:{dest_dir}{origin_dir}"]
         process = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
         out, err = await process.communicate()
         output = out.decode().strip()
@@ -275,7 +275,7 @@ class MirrorLeechListener:
         format_out += f"\n**Total Size**: {size}"
         format_out += f"\n<b>cc: </b>{self.tag}"
         #Get Link
-        cmd = ["rclone", "link", f'--config={conf}', f"{dest_drive}:{dest_dir}{origin_dir}"]
+        cmd = ["rclone", "link", f'--config={conf}', f"{dest_remote}:{dest_dir}{origin_dir}"]
         process = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
         out, err = await process.communicate()
         url = out.decode().strip()
@@ -325,12 +325,12 @@ class MirrorLeechListener:
         if return_code == 0:
             buttons.url_buildbutton("Cloud Link 🔗", url)
             if isGdrive:
-                await add_index_link(name, type, buttons)
+                add_index_link(name, type, buttons)
             await sendMarkup(msg, self.message, buttons.build_menu(2))
         else:
             if isGdrive:
-                await get_gdlink(remote, base, name, conf, type, buttons)
-                await add_index_link(name, type, buttons)
+                await get_drive_link(remote, base, name, conf, type, buttons)
+                add_index_link(name, type, buttons)
                 await sendMarkup(msg, self.message, buttons.build_menu(2))   
             else:
                 await sendMessage(msg, self.message)   

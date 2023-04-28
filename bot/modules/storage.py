@@ -1,43 +1,21 @@
-from configparser import ConfigParser
 from json import loads
 from math import floor
 from pyrogram.filters import command, regex
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
 from asyncio.subprocess import PIPE, create_subprocess_exec as exec
-from bot import LOGGER, bot
+from bot import bot
 from bot.helper.ext_utils.bot_commands import BotCommands
 from bot.helper.ext_utils.filters import CustomFilters
 from bot.helper.ext_utils.human_format import get_readable_file_size
-from bot.helper.ext_utils.rclone_utils import get_rclone_config, is_rclone_config
-from bot.helper.ext_utils.message_utils import editMarkup, sendMarkup, sendMessage
+from bot.helper.ext_utils.rclone_utils import get_rclone_path, is_rclone_config, list_remotes
+from bot.helper.ext_utils.message_utils import editMarkup, sendMessage
 from bot.helper.ext_utils.button_build import ButtonMaker
 
 
 
 async def handle_storage(client, message):
      if await is_rclone_config(message.from_user.id, message):
-          await list_drive(message)
-
-async def list_drive(message, edit= False):
-     if message.reply_to_message:
-        user_id= message.reply_to_message.from_user.id
-     else:
-        user_id= message.from_user.id
-
-     buttons = ButtonMaker()
-     conf_path = get_rclone_config(user_id)
-     conf = ConfigParser()
-     conf.read(conf_path)
-     for remote in conf.sections():
-          buttons.cb_buildbutton(f"📁{remote}", f"storagemenu^drive^{remote}^{user_id}") 
-
-     buttons.cb_buildbutton("✘ Close Menu", f"storagemenu^close^{user_id}")
-    
-     if edit:
-          await editMarkup("Select cloud to view storage info", message, reply_markup= buttons.build_menu(2))
-     else:
-          await sendMarkup("Select cloud to view storage info", message, reply_markup= buttons.build_menu(2))
-
+          await list_remotes(message, menu_type='storagemenu')
 
 async def storage_menu_cb(client, callback_query):
      query= callback_query
@@ -47,33 +25,36 @@ async def storage_menu_cb(client, callback_query):
      user_id= query.from_user.id
 
      if int(cmd[-1]) != user_id:
-          return await query.answer("This menu is not for you!", show_alert=True)
+          await query.answer("This menu is not for you!", show_alert=True)
+          return
 
-     if cmd[1] == "drive":
+     if cmd[1] == "remote":
           await rclone_about(message, query, cmd[2], user_id)
 
      elif cmd[1] == "back":
-          await list_drive(message, edit=True)
+          await list_remotes(message, menu_type='storagemenu', edit=True)
           await query.answer()
 
      elif cmd[1] == "close":
           await query.answer()
           await message.delete()     
 
-async def rclone_about(message, query, drive_name, user_id):
+async def rclone_about(message, query, remote_name, user_id):
      button= ButtonMaker()
-     conf_path = get_rclone_config(user_id)
-     cmd = ["rclone", "about", "--json", f'--config={conf_path}', f"{drive_name}:"] 
+     conf_path = await get_rclone_path(user_id, message)
+     cmd = ["rclone", "about", "--json", f'--config={conf_path}', f"{remote_name}:"] 
      process = await exec(*cmd, stdout=PIPE, stderr=PIPE)
      stdout, stderr = await process.communicate()
      return_code = await process.wait()
      stdout = stdout.decode().strip()
      if return_code != 0:
           err = stderr.decode().strip()
-          return await sendMessage(f'Error: {err}', message)
+          await sendMessage(f'Error: {err}', message)
+          return
      info = loads(stdout)
      if len(info) == 0:
-          return await query.answer("Team Drive with Unlimited Storage", show_alert=True)
+          await query.answer("Team Drive with Unlimited Storage", show_alert=True)
+          return
      result_msg= "<b>🗂 Storage Details</b>\n"
      try:
           used = get_readable_file_size(info['used'])

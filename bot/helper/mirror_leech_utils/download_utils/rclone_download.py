@@ -7,7 +7,7 @@ from bot.helper.ext_utils.filters import CustomFilters
 from bot.helper.ext_utils.message_utils import sendStatusMessage
 from bot.helper.ext_utils.rclone_data_holder import get_rclone_data
 from bot import LOGGER, status_dict, status_dict_lock, config_dict
-from bot.helper.ext_utils.rclone_utils import get_rclone_config
+from bot.helper.ext_utils.rclone_utils import get_rclone_path, setRcloneFlags
 from bot.helper.mirror_leech_utils.status_utils.rclone_status import RcloneStatus
 from bot.helper.mirror_leech_utils.status_utils.status_utils import MirrorStatus
 
@@ -27,7 +27,7 @@ class RcloneLeech:
         self.status_type= MirrorStatus.STATUS_DOWNLOADING
 
     async def leech(self):
-        conf_path = get_rclone_config(self.__user_id)
+        conf_path = await get_rclone_path(self.__user_id, self.__listener.message)
         if config_dict['MULTI_RCLONE_CONFIG'] or CustomFilters._owner_query(self.__user_id):
             leech_drive = get_rclone_data("LEECH_REMOTE", self.__user_id)
             cmd = ['rclone', 'copy', f'--config={conf_path}', f'{leech_drive}:{self.__origin_path}', f'{self.__dest_path}', '-P']
@@ -36,6 +36,7 @@ class RcloneLeech:
                 cmd = ['rclone', 'copy', f"--config={conf_path}", f"{DEFAULT_GLOBAL_REMOTE}:{self.__origin_path}", f'{self.__dest_path}', '-P']
             else:
                 return await self.__listener.onDownloadError("DEFAULT_GLOBAL_REMOTE not found")
+        await setRcloneFlags(cmd, 'download')    
         gid = ''.join(SystemRandom().choices(ascii_letters + digits, k=10)) 
         if self.__isFolder:
             self.name = ospath.basename(ospath.normpath(self.__dest_path))
@@ -45,7 +46,7 @@ class RcloneLeech:
             status = RcloneStatus(self, self.__listener, gid)
             status_dict[self.__listener.uid] = status
         await sendStatusMessage(self.__listener.message)
-        self.process = await create_subprocess_exec(*cmd, stdout=PIPE)
+        self.process = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
         await status.read_stdout()
         return_code = await self.process.wait()
         if self.__is_cancelled:
@@ -58,7 +59,11 @@ class RcloneLeech:
     
     async def cancel_download(self):
         self.__is_cancelled = True
-        self.process.kill() 
+        if self.process is not None:
+            try:
+                self.process.kill()
+            except:
+                pass
         await self.__listener.onDownloadError('Download cancelled!')
 
         
